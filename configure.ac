@@ -182,8 +182,9 @@ AM_CONDITIONAL([HAS_OPENCL], [test x$opencl = xyes])
 has_winpthread=false
 if test "x$have_win32" = xtrue; then
         has_winpthread=true
-        AC_CHECK_LIB(winpthread, nanosleep, , has_winpthread=false)
-        PTHREAD_LIBS=-lwinpthread
+        AC_CHECK_LIB(winpthread, nanosleep, , has_winpthread=false; PTHREAD_LIBS=-lwinpthread)
+		AC_CHECK_LIB(pthread, pthread_create, , has_winpthread=true; PTHREAD_LIBS=-lpthread)
+        
 fi
 
 if test "x$has_winpthread" != xtrue; then
@@ -197,23 +198,34 @@ AC_ARG_ENABLE([adl],
 	[adl=$enableval]
 	)
 
+AC_ARG_ENABLE([adl-checks],
+	[AC_HELP_STRING([--disable-adl-checks],[Disable file existence check and assume ADL headers are in place (for cross compiling)])], [],
+	[adlchecks=$enableval]
+	)
+
 scrypt="no"
 
 if test "$found_opencl" = 1; then
-	if test "x$adl" != xno; then
-		ADL_CPPFLAGS=
-		AC_CHECK_FILE([$srcdir/ADL_SDK/adl_sdk.h], [have_adl=true; ADL_CPPFLAGS=-I$srcdir], have_adl=false,)
-		if test x$have_adl+$have_cgminer_sdk = xfalse+true; then
-			AC_CHECK_FILE([$CGMINER_SDK/include/ADL_SDK/adl_sdk.h], [have_adl=true; ADL_CPPFLAGS=-I$CGMINER_SDK/include], have_adl=false,)
-		fi
-		if test x$have_adl = xtrue
-		then
-			AC_DEFINE([HAVE_ADL], [1], [Defined if ADL headers were found])
-		else
-			DLOPEN_FLAGS=""
+	if test "x$adlchecks" != xyes; then
+		adl=yes
+		have_adl=true
+		ADL_CPPFLAGS=-I$CGMINER_SDK/include
+		AC_DEFINE([HAVE_ADL], [1], [Defined if ADL headers were found])
+	else
+		if test "x$adl" != xno; then
+			ADL_CPPFLAGS=
+			AC_CHECK_FILE([$srcdir/ADL_SDK/adl_sdk.h], [have_adl=true; ADL_CPPFLAGS=-I$srcdir], have_adl=false,)
+			if test x$have_adl+$have_cgminer_sdk = xfalse+true; then
+				AC_CHECK_FILE([$CGMINER_SDK/include/ADL_SDK/adl_sdk.h], [have_adl=true; ADL_CPPFLAGS=-I$CGMINER_SDK/include], have_adl=false,)
+			fi
+			if test x$have_adl = xtrue
+			then
+				AC_DEFINE([HAVE_ADL], [1], [Defined if ADL headers were found])
+			else
+				DLOPEN_FLAGS=""
+			fi
 		fi
 	fi
-
 	AC_ARG_ENABLE([scrypt],
 		[AC_HELP_STRING([--enable-scrypt],[Compile support for scrypt litecoin mining (default disabled)])],
 		[scrypt=$enableval]

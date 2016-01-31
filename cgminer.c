@@ -268,7 +268,7 @@ static struct pool *currentpool = NULL;
 int total_pools, enabled_pools;
 enum pool_strategy pool_strategy = POOL_FAILOVER;
 int opt_rotate_period;
-static int total_urls, total_users, total_passes, total_userpasses;
+static int total_urls, total_certs, total_users, total_passes, total_userpasses;
 
 static
 #ifndef HAVE_CURSES
@@ -833,6 +833,20 @@ static char *set_quota(char *arg)
 	return NULL;
 }
 
+static char *set_cert(const char *arg)
+{
+	struct pool *pool;
+
+	total_certs++;
+	if (total_certs > total_pools)
+		add_pool();
+	pool = pools[total_certs - 1];
+
+	opt_set_charp(arg, &pool->rpc_cert);
+
+	return NULL;
+}
+
 static char *set_user(const char *arg)
 {
 	struct pool *pool;
@@ -1131,6 +1145,9 @@ static struct opt_table opt_config_table[] = {
 			opt_set_bool, &opt_bfl_noncerange,
 			"Use nonce range on bitforce devices if supported"),
 #endif
+	OPT_WITH_ARG("--cert|-C",
+		     set_cert, NULL, NULL,
+		     "Server certificate for self-signed JSON-RPC server"),
 #ifdef USE_BFLSC
 	OPT_WITH_ARG("--bflsc-overheat",
 		     set_int_0_to_200, opt_show_intval, &opt_bflsc_overheat,
@@ -1862,8 +1879,9 @@ static void update_gbt(struct pool *pool)
 	if (unlikely(!curl))
 		quit (1, "CURL initialisation failed in update_gbt");
 
-	val = json_rpc_call(curl, pool->rpc_url, pool->rpc_userpass,
-			    pool->rpc_req, true, false, &rolltime, pool, false);
+	val = json_rpc_call(curl, pool->rpc_url, pool->rpc_cert,
+			    pool->rpc_userpass, pool->rpc_req, true, false,
+			    &rolltime, pool, false);
 
 	if (val) {
 		struct work *work = make_work();
@@ -2849,7 +2867,7 @@ static bool submit_upstream_work(struct work *work, CURL *curl, bool resubmit)
 
 	cgtime(&tv_submit);
 	/* issue JSON-RPC request */
-	val = json_rpc_call(curl, pool->rpc_url, pool->rpc_userpass, s, false, false, &rolltime, pool, true);
+	val = json_rpc_call(curl, pool->rpc_url, pool->rpc_cert, pool->rpc_userpass, s, false, false, &rolltime, pool, true);
 	cgtime(&tv_submit_reply);
 	free(s);
 
@@ -2966,7 +2984,8 @@ static bool get_upstream_work(struct work *work, CURL *curl)
 
 	cgtime(&work->tv_getwork);
 
-	val = json_rpc_call(curl, url, pool->rpc_userpass, pool->rpc_req, false,
+	val = json_rpc_call(curl, url, pool->rpc_cert,
+			    pool->rpc_userpass, pool->rpc_req, false,
 			    false, &work->rolltime, pool, false);
 	pool_stats->getwork_attempts++;
 
@@ -4452,6 +4471,8 @@ void write_config(FILE *fcfg)
 				pool->rpc_proxy ? "|" : "",
 				json_escape(pool->rpc_url));
 		}
+		if (pools[i]->rpc_cert)
+			fprintf(fcfg, "\n\t\t\"cert\" : \"%s\",", json_escape(pools[i]->rpc_cert));
 		fprintf(fcfg, "\n\t\t\"user\" : \"%s\",", json_escape(pool->rpc_user));
 		fprintf(fcfg, "\n\t\t\"pass\" : \"%s\"\n\t}", json_escape(pool->rpc_pass));
 		}
@@ -5794,8 +5815,9 @@ retry_stratum:
 	/* Probe for GBT support on first pass */
 	if (!pool->probed && !opt_fix_protocol) {
 		applog(LOG_DEBUG, "Probing for GBT support");
-		val = json_rpc_call(curl, pool->rpc_url, pool->rpc_userpass,
-				    gbt_req, true, false, &rolltime, pool, false);
+		val = json_rpc_call(curl, pool->rpc_url, pool->rpc_cert,
+				    pool->rpc_userpass, gbt_req, true, false,
+				    &rolltime, pool, false);
 		if (val) {
 			bool append = false, submit = false;
 			json_t *res_val, *mutables;
@@ -5839,8 +5861,9 @@ retry_stratum:
 	}
 
 	cgtime(&tv_getwork);
-	val = json_rpc_call(curl, pool->rpc_url, pool->rpc_userpass,
-			    pool->rpc_req, true, false, &rolltime, pool, false);
+	val = json_rpc_call(curl, pool->rpc_url, pool->rpc_cert,
+			    pool->rpc_userpass, pool->rpc_req, true, false,
+			    &rolltime, pool, false);
 	cgtime(&tv_getwork_reply);
 
 	/* Detect if a http getwork pool has an X-Stratum header at startup,
@@ -7007,8 +7030,9 @@ retry_pool:
 		 * so always establish a fresh connection instead of relying on
 		 * a persistent one. */
 		curl_easy_setopt(curl, CURLOPT_FRESH_CONNECT, 1);
-		val = json_rpc_call(curl, lp_url, pool->rpc_userpass,
-				    lpreq, false, true, &rolltime, pool, false);
+		val = json_rpc_call(curl, lp_url, pool->rpc_cert,
+				    pool->rpc_userpass, lpreq, false, true,
+				    &rolltime, pool, false);
 
 		cgtime(&reply);
 

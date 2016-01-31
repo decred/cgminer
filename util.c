@@ -295,7 +295,7 @@ static int curl_debug_cb(__maybe_unused CURL *handle, curl_infotype type,
 	return 0;
 }
 
-json_t *json_rpc_call(CURL *curl, const char *url,
+json_t *json_rpc_call(CURL *curl, const char *url, const char *cert,
 		      const char *userpass, const char *rpc_req,
 		      bool probe, bool longpoll, int *rolltime,
 		      struct pool *pool, bool share)
@@ -328,6 +328,8 @@ json_t *json_rpc_call(CURL *curl, const char *url,
 
 	curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1);
 	curl_easy_setopt(curl, CURLOPT_URL, url);
+	if (cert != NULL)
+		curl_easy_setopt(curl, CURLOPT_CAINFO, cert);
 	curl_easy_setopt(curl, CURLOPT_ENCODING, "");
 	curl_easy_setopt(curl, CURLOPT_FAILONERROR, 1);
 

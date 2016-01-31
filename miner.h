@@ -1077,9 +1077,9 @@ extern pthread_rwlock_t netacc_lock;
 
 extern const uint32_t sha256_init_state[];
 #ifdef HAVE_LIBCURL
-extern json_t *json_rpc_call(CURL *curl, const char *url, const char *userpass,
-			     const char *rpc_req, bool, bool, int *,
-			     struct pool *pool, bool);
+extern json_t *json_rpc_call(CURL *curl, const char *url, const char *cert,
+			     const char *userpass, const char *rpc_req, bool,
+			     bool, int *, struct pool *pool, bool);
 #endif
 extern const char *proxytype(proxytypes_t proxytype);
 extern char *get_proxy(char *url, struct pool *pool);
@@ -1329,6 +1329,7 @@ struct pool {
 
 	char *rpc_req;
 	char *rpc_url;
+	char *rpc_cert;
 	char *rpc_userpass;
 	char *rpc_user, *rpc_pass;
 	proxytypes_t rpc_proxytype;

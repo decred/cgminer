@@ -88,6 +88,67 @@ char *curly = ":D";
 #	define USE_FPGA
 #endif
 
+/* Secure random generation to create unique nonces on 
+ * both Windows and Linux 
+ * Code sourced from: https://github.com/cjdelisle/cnacl */
+#if defined(_WIN32) || defined(_WIN64)
+#include <windows.h>
+#include <wincrypt.h>
+#include <process.h>
+#include <assert.h>
+
+void randombytes(unsigned char *x,unsigned long long xlen)
+{
+	static int provider_set = 0;
+	static HCRYPTPROV provider;
+
+	if (!provider_set) {
+		if (!CryptAcquireContext(&provider, NULL, NULL, PROV_RSA_FULL, CRYPT_VERIFYCONTEXT)) {
+			if (GetLastError() != (DWORD)NTE_BAD_KEYSET) {
+				assert(0);
+            }
+		}
+		provider_set = 1;
+	}
+	if (!CryptGenRandom(provider, xlen, x)) {
+		assert(0);
+    }
+}
+#endif
+#if defined(unix) || defined(__APPLE__)
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
+static int fd = -1;
+
+void randombytes(unsigned char *x,unsigned long long xlen)
+{
+	int i;
+
+	if (fd == -1) {
+		for (;;) {
+			fd = open("/dev/urandom",O_RDONLY);
+			if (fd != -1) break;
+				sleep(1);
+		}
+	}
+
+	while (xlen > 0) {
+		if (xlen < 1048576) i = xlen; else i = 1048576;
+
+		i = read(fd,x,i);
+		if (i < 1) {
+			sleep(1);
+			continue;
+		}
+
+		x += i;
+		xlen -= i;
+	}
+}
+#endif
+
 struct strategies strategies[] = {
 	{ "Failover" },
 	{ "Round Robin" },
@@ -283,6 +344,7 @@ bool curses_active;
 /* Protected by ch_lock */
 char current_hash[68];
 static char prev_block[12];
+static char chain_height[12];
 static char current_block[32];
 
 static char datestamp[40];
@@ -471,6 +533,29 @@ struct cgpu_info *get_devices(int id)
 	rd_unlock(&devices_lock);
 
 	return cgpu;
+}
+
+/* Fast PRNG for making non-duplicate work orders
+ * 
+ * This is the fastest generator passing BigCrush without
+ * systematic failures, but due to the relatively short period it is
+ * acceptable only for applications with a mild amount of parallelism;
+ * otherwise, use a xorshift1024* generator.
+
+ * The state must be seeded so that it is not everywhere zero. If you have
+ * a 64-bit seed, we suggest to seed a splitmix64 generator and use its
+ * output to fill s. */
+
+uint64_t r_seed[2];
+pthread_mutex_t xor_prng_lock;
+
+uint64_t next(void) {
+	uint64_t s1 = r_seed[0];
+	const uint64_t s0 = r_seed[1];
+	r_seed[0] = s0;
+	s1 ^= s1 << 23; // a
+	r_seed[1] = s1 ^ s0 ^ (s1 >> 18) ^ (s0 >> 5); // b, c
+	return r_seed[1] + s0; 
 }
 
 static void sharelog(const char*disposition, const struct work*work)
@@ -2345,8 +2430,8 @@ static void curses_print_status(void)
 			pool->has_gbt ? "GBT" : "LP", pool->rpc_user);
 	}
 	wclrtoeol(statuswin);
-	cg_mvwprintw(statuswin, 5, 0, " Block: %s...  Diff:%s  Started: %s  Best share: %s   ",
-		     prev_block, block_diff, blocktime, best_share);
+	cg_mvwprintw(statuswin, 5, 0, " Block: %s  Diff:%s  Started: %s  Best share: %s   ",
+		     chain_height, block_diff, blocktime, best_share);
 	mvwhline(statuswin, 6, 0, '-', 80);
 	mvwhline(statuswin, statusy - 1, 0, '-', 80);
 	cg_mvwprintw(statuswin, devcursor - 1, 1, "[P]ool management %s[S]ettings [D]isplay options [Q]uit",
@@ -2797,23 +2882,30 @@ static bool submit_upstream_work(struct work *work, CURL *curl, bool resubmit)
 
 	cgpu = get_thr_cgpu(thr_id);
 
-	/* flip endianness of the nonce */
+	/* Recast as uint32_t and copy */
 	data_cast_as_32 = (uint32_t*) work->data;
 	for (i = 0; i < 48; ++i) {
 		data32[i] = data_cast_as_32[i];
+		/* Swap the nonce endianness, since it 
+		 * was calculating these as if they were 
+		 * big endian but we need to return little 
+		 * endian. */
 		if (i == 35) {
 			data32[i] = swab32(data32[i]);
 		}
 	}
 	
-	applog(LOG_DEBUG, "Submitting upstream work (backwards uint32 endianness shown)");
-	applog(LOG_DEBUG, "Sub0: %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x", data32[0], data32[1], data32[2], data32[3], data32[4], data32[5], data32[6], data32[7], data32[8], data32[9],
+	applog(LOG_DEBUG, "Submitting upstream work");
+	applog(LOG_DEBUG, "Sub0: %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x", 
+		data32[0], data32[1], data32[2], data32[3], data32[4], data32[5], data32[6], data32[7], data32[8], data32[9],
 		data32[10], data32[11], data32[12], data32[13], data32[14], data32[15], data32[16], data32[17], data32[18], data32[19]);
-	applog(LOG_DEBUG, "Sub1: %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x", data32[20], data32[21], data32[22], data32[23], data32[24], data32[25], data32[26], data32[27], data32[28], data32[29],
+	applog(LOG_DEBUG, "Sub1: %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x", 
+		data32[20], data32[21], data32[22], data32[23], data32[24], data32[25], data32[26], data32[27], data32[28], data32[29],
 		data32[30], data32[31], data32[32], data32[33], data32[34], data32[35], data32[36], data32[37], data32[38], data32[39]);
-	applog(LOG_DEBUG, "Sub2: %x %x %x %x %x %x %x %x\n", data32[40], data32[41], data32[42], data32[43], data32[44], data32[45], data32[46], data32[47]);
-	
-	/* Copy to byte array */
+	applog(LOG_DEBUG, "Sub2: %x %x %x %x %x %x %x %x\n", 
+		data32[40], data32[41], data32[42], data32[43], data32[44], data32[45], data32[46], data32[47]);
+
+		/* Copy to byte array */
 	for (i = 0; i < 48; ++i) {
 		data8[i*4+0] = (data32[i] & 0x000000ff);
 		data8[i*4+1] = (data32[i] & 0x0000ff00) >> 8;
@@ -3526,9 +3618,9 @@ static void roll_work(struct work *work)
 	uint32_t ntime;
 
 	work_ntime = (uint32_t *)(work->data + 136);
-	ntime = be32toh(*work_ntime);
+	ntime = *work_ntime;
 	ntime++;
-	*work_ntime = htobe32(ntime);
+	*work_ntime = ntime;
 	local_work++;
 	work->rolls++;
 	work->blk.nonce = 0;
@@ -3679,8 +3771,8 @@ static char *offset_ntime(const char *ntime, int noffset)
 	uint32_t h32, *be32 = (uint32_t *)bin;
 
 	hex2bin(bin, ntime, 4);
-	h32 = be32toh(*be32) + noffset;
-	*be32 = htobe32(h32);
+	h32 = *be32 + noffset;
+	*be32 = h32;
 
 	return bin2hex(bin, 4);
 }
@@ -3704,20 +3796,20 @@ static void _copy_work(struct work *work, const struct work *base_work, int noff
 		/* If we are passed an noffset the binary work->data ntime and
 		 * the work->ntime hex string need to be adjusted. */
 		if (noffset) {
-			uint32_t *work_ntime = (uint32_t *)(work->data + 68);
-			uint32_t ntime = be32toh(*work_ntime);
+			uint32_t *work_ntime = (uint32_t *)(work->data + 136);
+			uint32_t ntime = *work_ntime;
 
 			ntime += noffset;
-			*work_ntime = htobe32(ntime);
+			*work_ntime = ntime;
 			work->ntime = offset_ntime(base_work->ntime, noffset);
 		} else
 			work->ntime = strdup(base_work->ntime);
 	} else if (noffset) {
-		uint32_t *work_ntime = (uint32_t *)(work->data + 68);
-		uint32_t ntime = be32toh(*work_ntime);
+		uint32_t *work_ntime = (uint32_t *)(work->data + 136);
+		uint32_t ntime = *work_ntime;
 
 		ntime += noffset;
-		*work_ntime = htobe32(ntime);
+		*work_ntime = ntime;
 	}
 	if (base_work->coinbase)
 		work->coinbase = strdup(base_work->coinbase);
@@ -4105,7 +4197,7 @@ static void signal_work_update(void)
 	rd_unlock(&mining_thr_lock);
 }
 
-static void set_curblock(char *hexstr, unsigned char *bedata)
+static void set_curblock(char *hexstr, unsigned char *bedata, uint32_t height)
 {
 	int ofs;
 
@@ -4122,8 +4214,10 @@ static void set_curblock(char *hexstr, unsigned char *bedata)
 	}
 	strncpy(prev_block, &current_hash[ofs], 8);
 	prev_block[8] = '\0';
+	
+	sprintf(chain_height, "%" PRIu32, height);
 
-	applog(LOG_INFO, "New block: %s... diff %s", current_hash, block_diff);
+	applog(LOG_INFO, "New block: %s... diff %s, height %d", current_hash, block_diff, height);
 }
 
 /* Search to see if this string is from a block that has been seen before */
@@ -4157,23 +4251,28 @@ static int block_sort(struct block *blocka, struct block *blockb)
 }
 
 /* Decode the current block difficulty which is in packed form */
+/* Using code from 
+ * bitcoin/src/rpc/blockchain.cpp#L31-L60 */
 static void set_blockdiff(const struct work *work)
 {
 	uint32_t* data_cast_as_32 = (uint32_t*) work->data;
 	uint32_t diff32BE = data_cast_as_32[29];
-	
-	/* Mask off the exponent and make it into a byte */
-	uint8_t pow = (uint8_t)((diff32BE&0xff000000)>>24);
-	 
-	/* Pop off the rest and shift it according to    */
-	/* the exponent. Divide mindiff by it.           */
-	/* Testnet has a different mindiff than mainnet  */
-	/* mindiff, this may calculate incorrectly on    */
-	/* testnet mining.                               */
-	int powdiff = (8 * (0x1d - 3)) - (8 * (pow - 3));
-	uint32_t diff32 = be32toh(diff32BE) & 0x00FFFFFF;
-	double numerator = 0xFFFFULL << powdiff;
-	double ddiff = numerator / (double)diff32;
+
+	int nShift = (diff32BE >> 24) & 0xff;
+
+	double ddiff =
+		(double)0x0000ffff / (double)(diff32BE & 0x00ffffff);
+
+	while (ddiff < 29)
+	{
+		ddiff *= 256.0;
+		nShift++;
+	}
+	while (nShift > 29)
+	{
+		ddiff /= 256.0;
+		nShift--;
+	}
 
 	if (unlikely(current_diff != ddiff)) {
 		suffix_string(ddiff, block_diff, sizeof(block_diff), 0);
@@ -4192,6 +4291,7 @@ static bool test_work_current(struct work *work)
 	if (work->mandatory)
 		return ret;
 
+	uint32_t height = *(uint32_t *)(work->data + 128);
 	swap256(bedata, work->data + 4);
 	__bin2hex(hexstr, bedata, 32);
 
@@ -4225,7 +4325,7 @@ static bool test_work_current(struct work *work)
 
 		if (deleted_block)
 			applog(LOG_DEBUG, "Deleted block %d from database", deleted_block);
-		set_curblock(hexstr, bedata);
+		set_curblock(hexstr, bedata, height);
 		/* Copy the information to this pool's prev_block since it
 		 * knows the new block exists. */
 		memcpy(pool->prev_block, bedata, 32);
@@ -6181,6 +6281,17 @@ struct work *get_work(struct thr_info *thr, const int thr_id)
 		}
 	}
 	applog(LOG_DEBUG, "Got work from get queue to get work for thread %d", thr_id);
+	uint32_t *data_cast_as_32;
+	data_cast_as_32 = (uint32_t*) work->data;
+	applog(LOG_DEBUG, "Merkle root for work popped: %x", data_cast_as_32[9]);
+	
+	/* Assign a random unique ID to this work that we've just popped off. */
+	mutex_lock(&xor_prng_lock);
+	uint64_t r_uint64 = next();
+	mutex_unlock(&xor_prng_lock);
+	applog(LOG_DEBUG, "Assigning unique work ID %x, %x", (uint32_t)(r_uint64 >> 32), (uint32_t)r_uint64);
+	data_cast_as_32[36] = (uint32_t)(r_uint64 >> 32);
+	data_cast_as_32[37] = (uint32_t)r_uint64;
 
 	work->thr_id = thr_id;
 	thread_reportin(thr);
@@ -6296,7 +6407,7 @@ static void update_work_stats(struct thr_info *thr, struct work *work)
 		work->pool->solved++;
 		found_blocks++;
 		work->mandatory = true;
-		applog(LOG_NOTICE, "Found block for pool %d!", work->pool->pool_no);
+		applog(LOG_NOTICE, "Found share for pool %d!", work->pool->pool_no);
 	}
 
 	mutex_lock(&stats_lock);
@@ -6390,6 +6501,7 @@ static void mt_disable(struct thr_info *mythr, const int thr_id,
  * range has been hashed if needed. */
 static void hash_sole_work(struct thr_info *mythr)
 {
+	applog(LOG_DEBUG, "Begin hashing sole work on thread ID %d", mythr->id);
 	const int thr_id = mythr->id;
 	struct cgpu_info *cgpu = mythr->cgpu;
 	struct device_drv *drv = cgpu->drv;
@@ -6415,16 +6527,6 @@ static void hash_sole_work(struct thr_info *mythr)
 		mythr->work_restart = false;
 		cgpu->new_work = true;
 
-		cgtime(&tv_workstart);
-		work->blk.nonce = 0;
-		cgpu->max_hashes = 0;
-		if (!drv->prepare_work(mythr, work)) {
-			applog(LOG_ERR, "work prepare failed, exiting "
-				"mining thread %d", thr_id);
-			break;
-		}
-		work->device_diff = MIN(drv->working_diff, work->work_difficulty);
-
 		/* Dynamically adjust the working diff even if the target
 		 * diff is very high to ensure we can still validate scrypt/blake is
 		 * returning shares. */
@@ -6443,8 +6545,32 @@ static void hash_sole_work(struct thr_info *mythr)
 			set_target(work->device_target, work->device_diff);
 		}
 
+		uint64_t counter = 0;
 		do {
 			cgtime(&tv_start);
+			uint32_t *data_cast_as_32;
+			data_cast_as_32 = (uint32_t*) work->data;
+			
+			/* Occasionally update the extra nonce */
+			if (!(counter & 0x00FF)) {
+				data_cast_as_32[38]++;
+				
+				cgtime(&tv_workstart);
+				work->blk.nonce = 0;
+				cgpu->max_hashes = 0;
+				if (!drv->prepare_work(mythr, work)) {
+					applog(LOG_ERR, "work prepare failed, exiting "
+						"mining thread %d", thr_id);
+					break;
+				}
+				
+				applog(LOG_DEBUG, "Do sole work scanhash for merkle root %x, extra_nonce %x %x %x %x (counter %d)", 
+                    data_cast_as_32[9], data_cast_as_32[36], data_cast_as_32[37], data_cast_as_32[38], data_cast_as_32[39], counter);
+			}
+			counter++;
+		
+			work->device_diff = MIN(drv->working_diff, work->work_difficulty);
+				cgtime(&tv_start);
 
 			subtime(&tv_start, &getwork_start);
 
@@ -6469,7 +6595,6 @@ static void hash_sole_work(struct thr_info *mythr)
 			/* Only allow the mining thread to be cancelled when
 			 * it is not in the driver code. */
 			pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, NULL);
-
 			thread_reportin(mythr);
 			hashes = drv->scanhash(mythr, work, work->blk.nonce + max_nonce);
 			thread_reportout(mythr);
@@ -8130,6 +8255,9 @@ int main(int argc, char *argv[])
 	rwlock_init(&mining_thr_lock);
 	rwlock_init(&devices_lock);
 
+	if (unlikely(pthread_mutex_init(&xor_prng_lock, NULL)))
+		quit(1, "Failed to pthread_mutex_init xor_prng_lock");
+	
 	mutex_init(&lp_lock);
 	if (unlikely(pthread_cond_init(&lp_cond, NULL)))
 		quit(1, "Failed to pthread_cond_init lp_cond");
@@ -8542,6 +8670,28 @@ begin_bench:
 	if (total_control_threads != 8)
 		quit(1, "incorrect total_control_threads (%d) should be 8", total_control_threads);
 
+	/* Seed the PRNG with the some random bytes and the device ID. */
+	unsigned char rand_bytes_8[8];
+	randombytes(rand_bytes_8, 8);
+	mutex_lock(&xor_prng_lock);
+	r_seed[0] = ((uint64_t)rand_bytes_8[0])<<(8*7) 
+				 | ((uint64_t)rand_bytes_8[1])<<(8*6)
+				 | ((uint64_t)rand_bytes_8[2])<<(8*5)
+				 | ((uint64_t)rand_bytes_8[3])<<(8*4)
+				 | ((uint64_t)rand_bytes_8[4])<<(8*3)
+				 | ((uint64_t)rand_bytes_8[5])<<(8*2)
+				 | ((uint64_t)rand_bytes_8[6])<<(8*1)
+				 | ((uint64_t)rand_bytes_8[7]);
+	r_seed[1] = (uint64_t)(r_seed[0] ^ 0xFE2355661ECA99BC);
+	for (i = 0; i < MAX_DEVICES; i++) {
+		if (devices_enabled[i]) {
+			r_seed[0] += i;
+			break;
+		}
+	}
+	mutex_unlock(&xor_prng_lock);
+	applog(LOG_DEBUG, "PRNG initialized with seed [%016llX,%016llX]", r_seed[0], r_seed[1]);
+	
 	/* Once everything is set up, main() becomes the getwork scheduler */
 	while (42) {
 		int ts, max_staged = opt_queue;

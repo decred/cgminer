@@ -211,6 +211,7 @@ if test "$found_opencl" = 1; then
 			[#if defined (__linux__) && !defined(LINUX)
 			 #  define LINUX
 			 #endif
+			 #include <stdbool.h>
 			 AC_INCLUDES_DEFAULT()])
 		CFLAGS=$SAVED_CFLAGS
 		if test x$have_adl+$have_cgminer_sdk = xfalse+true; then

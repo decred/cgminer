@@ -1517,7 +1517,7 @@ static bool opencl_prepare_work(struct thr_info __maybe_unused *thr, struct work
 #endif
 	if (opt_blake256) {
 		work->blk.work = work;
-		precalc_hash_blake256(&work->blk, 0, (uint32_t *)(work->data));
+		if(!work->MidstateValid) precalc_hash_blake256(&work->blk, 0, (uint32_t *)(work->data));
 	} else
 		precalc_hash(&work->blk, (uint32_t *)(work->midstate), (uint32_t *)(work->data + 64));
 	return true;

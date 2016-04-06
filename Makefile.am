@@ -18,7 +18,7 @@ EXTRA_DIST	= example.conf m4/gnulib-cache.m4 linux-usb-cgminer \
 
 SUBDIRS		= lib compat ccan
 
-INCLUDES	= $(PTHREAD_FLAGS) -fno-strict-aliasing $(JANSSON_INCLUDES) $(USBUTILS_INCLUDES)
+INCLUDES	= $(PTHREAD_FLAGS) -msse2 -std=gnu11 $(JANSSON_INCLUDES) $(USBUTILS_INCLUDES)
 
 bin_PROGRAMS	= cgminer
 

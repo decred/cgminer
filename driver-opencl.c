@@ -1121,7 +1121,7 @@ static void set_threads_hashes(unsigned int vectors,int64_t *hashes, size_t *glo
 	unsigned int threads = 0;
 
 	while (threads < minthreads) {
-		threads = 1 << ((opt_scrypt ? 0 : 15) + *intensity);
+		threads = 1 << (((opt_scrypt || opt_blake256) ? 0 : 15) + *intensity);
 		if (threads < minthreads) {
 			if (likely(*intensity < MAX_INTENSITY))
 				(*intensity)++;

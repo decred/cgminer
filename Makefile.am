@@ -51,7 +51,7 @@ bin_SCRIPTS	= $(top_srcdir)/*.cl
 cgminer_SOURCES += driver-opencl.h driver-opencl.c
 cgminer_SOURCES += ocl.c ocl.h findnonce.c findnonce.h
 cgminer_SOURCES += adl.c adl.h adl_functions.h
-cgminer_SOURCES += blake.c blake.h sph_blake.h sph_types.h
+cgminer_SOURCES += blake256.c blake256.h
 cgminer_SOURCES += *.cl
 
 if HAS_SCRYPT

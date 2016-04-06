@@ -18,6 +18,7 @@
 
 #include "findnonce.h"
 #include "scrypt.h"
+#include "blake256.h"
 
 const uint32_t SHA256_K[64] = {
 	0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5,
@@ -173,167 +174,60 @@ void precalc_hash(dev_blk_ctx *blk, uint32_t *state, uint32_t *data)
 
 // BLAKE 256 8 rounds
 
-typedef struct
+static uint32_t BLAKE256_CONSTS[16] =
 {
-  uint32_t h[8];
-  uint32_t t;
-} blake_state256;
-
-#define NB_ROUNDS32 14
-
-const uint8_t blake_sigma[][16] =
-{
-  { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 },
-  {14, 10, 4, 8, 9, 15, 13, 6, 1, 12, 0, 2, 11, 7, 5, 3 },
-  {11, 8, 12, 0, 5, 2, 15, 13, 10, 14, 3, 6, 7, 1, 9, 4 },
-  { 7, 9, 3, 1, 13, 12, 11, 14, 2, 6, 5, 10, 4, 0, 15, 8 },
-  { 9, 0, 5, 7, 2, 4, 10, 15, 14, 1, 11, 12, 6, 8, 3, 13 },
-  { 2, 12, 6, 10, 0, 11, 8, 3, 4, 13, 7, 5, 15, 14, 1, 9 },
-  {12, 5, 1, 15, 14, 13, 4, 10, 0, 7, 6, 3, 9, 2, 8, 11 },
-  {13, 11, 7, 14, 12, 1, 3, 9, 5, 0, 15, 4, 8, 6, 2, 10 },
-  { 6, 15, 14, 9, 11, 3, 0, 8, 12, 2, 13, 7, 1, 4, 10, 5 },
-  {10, 2, 8, 4, 7, 6, 1, 5, 15, 11, 9, 14, 3, 12, 13 , 0 },
-  { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 },
-  {14, 10, 4, 8, 9, 15, 13, 6, 1, 12, 0, 2, 11, 7, 5, 3 },
-  {11, 8, 12, 0, 5, 2, 15, 13, 10, 14, 3, 6, 7, 1, 9, 4 },
-  { 7, 9, 3, 1, 13, 12, 11, 14, 2, 6, 5, 10, 4, 0, 15, 8 },
-  { 9, 0, 5, 7, 2, 4, 10, 15, 14, 1, 11, 12, 6, 8, 3, 13 },
-  { 2, 12, 6, 10, 0, 11, 8, 3, 4, 13, 7, 5, 15, 14, 1, 9 }
+	0x243F6A88U, 0x85A308D3U, 0x13198A2EU, 0x03707344U,
+	0xA4093822U, 0x299F31D0U, 0x082EFA98U, 0xEC4E6C89U,
+	0x452821E6U, 0x38D01377U, 0xBE5466CFU, 0x34E90C6CU,
+	0xC0AC29B7U, 0xC97C50DDU, 0x3F84D5B5U, 0xB5470917U
 };
 
-const uint32_t blake_u256[16] =
+#define SPH_ROTR32(x, y)	(((x) >> (y)) | ((x) << (32 - (y))))
+#define SPH_T32(x)	x
+
+#define BLAKE_SMALL_G(m0, m1, c0, c1, a, b, c, d)   do { \
+		a = a + b + (m0 ^ c1); \
+		d = SPH_ROTR32(d ^ a, 16); \
+		c = SPH_T32(c + d); \
+		b = SPH_ROTR32(b ^ c, 12); \
+		a = SPH_T32(a + b + (m1 ^ c0)); \
+		d = SPH_ROTR32(d ^ a, 8); \
+		c = SPH_T32(c + d); \
+		b = SPH_ROTR32(b ^ c, 7); \
+	} while (0)
+	
+#define BLAKE_SMALL_HALF_G(m0, c1, a, b, c, d)   do { \
+	a = a + b + (m0 ^ c1); \
+	d = SPH_ROTR32(d ^ a, 16); \
+	c = SPH_T32(c + d); \
+	b = SPH_ROTR32(b ^ c, 12); \
+	a += b; \
+} while (0)
+
+void precalc_hash_blake256(dev_blk_ctx *blk, uint32_t *st, uint32_t *data)
 {
-  0x243f6a88, 0x85a308d3, 0x13198a2e, 0x03707344,
-  0xa4093822, 0x299f31d0, 0x082efa98, 0xec4e6c89,
-  0x452821e6, 0x38d01377, 0xbe5466cf, 0x34e90c6c,
-  0xc0ac29b7, 0xc97c50dd, 0x3f84d5b5, 0xb5470917
-};
-
-#define ROT32(x,n) (((x)<<(32-n))|( (x)>>(n)))
-//#define ROT32(x,n)   (rotate((uint)x, (uint)32-n))
-#define ADD32(x,y)   ((uint32_t)((x) + (y)))
-#define XOR32(x,y)   ((uint32_t)((x) ^ (y)))
-
-#define G(a,b,c,d,i) \
-do {\
-    v[a] += XOR32(m[blake_sigma[r][i]], blake_u256[blake_sigma[r][i+1]]) + v[b];\
-    v[d]  = ROT32(XOR32(v[d],v[a]),16);\
-    v[c] += v[d];\
-    v[b]  = ROT32(XOR32(v[b],v[c]),12);\
-    v[a] += XOR32(m[blake_sigma[r][i+1]], blake_u256[blake_sigma[r][i]]) + v[b]; \
-    v[d]  = ROT32(XOR32(v[d],v[a]), 8);\
-    v[c] += v[d];\
-    v[b]  = ROT32(XOR32(v[b],v[c]), 7);\
-  } while (0)
-
-
-// compress a block
-void blake256_compress_block( blake_state256 *S, uint32_t *m)
-{
-  uint32_t v[16];
-  int i, r;
-  for( i = 0; i < 8; ++i )  v[i] = S->h[i];
-
-  v[ 8] = blake_u256[0];
-  v[ 9] = blake_u256[1];
-  v[10] = blake_u256[2];
-  v[11] = blake_u256[3];
-  v[12] = blake_u256[4];
-  v[13] = blake_u256[5];
-  v[14] = blake_u256[6];
-  v[15] = blake_u256[7];
- 
-  v[12] ^= S->t;
-  v[13] ^= S->t;
-
-  for(r = 0; r < NB_ROUNDS32; ++r )
-  {
-    /* column step */
-    G( 0,  4,  8, 12,  0 );
-    G( 1,  5,  9, 13,  2 );
-    G( 2,  6, 10, 14,  4 );
-    G( 3,  7, 11, 15,  6 );
-    /* diagonal step */
-    G( 0,  5, 10, 15,  8 );
-    G( 1,  6, 11, 12, 10 );
-    G( 2,  7,  8, 13, 12 );
-    G( 3,  4,  9, 14, 14 );
-  }
-
-  for( i = 0; i < 16; ++i )  S->h[i & 7] ^= v[i];
-}
-
-
-void blake256_init( blake_state256 *S )
-{
-  S->h[0] = 0x6a09e667;
-  S->h[1] = 0xbb67ae85;
-  S->h[2] = 0x3c6ef372;
-  S->h[3] = 0xa54ff53a;
-  S->h[4] = 0x510e527f;
-  S->h[5] = 0x9b05688c;
-  S->h[6] = 0x1f83d9ab;
-  S->h[7] = 0x5be0cd19;
-  S->t = 0;
-}
-
-
-void blake256_update( blake_state256 *S, const uint32_t *in)
-{
-	uint32_t m[16];
-	int i;
-    S->t += 512;
-    for(i = 0; i < 16; ++i )  m[i] = in[i];
-	applog(LOG_DEBUG, "In  : %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x", m[0], m[1], m[2], m[3], m[4], m[5], m[6], m[7], m[8], m[9],
-        m[10], m[11], m[12], m[13], m[14], m[15]);
-    blake256_compress_block( S, m);
-}
-
-void precalc_hash_blake256(dev_blk_ctx *blk, uint32_t *state, uint32_t *data)
-{
+	state s;
 	uint32_t swap[45];
+	
 	flip180(swap, data);
 	data = swap;
 	
-	blake_state256 S;
-	blake256_init( &S );
-	blake256_update( &S, data );
-	blake256_update( &S, data + 16 );
-	applog(LOG_DEBUG, "Msg0: %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x", data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7], data[8], data[9],
-        data[10], data[11], data[12], data[13], data[14], data[15], data[16], data[17], data[18], data[19]);
-    applog(LOG_DEBUG, "Msg1: %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x", data[20], data[21], data[22], data[23], data[24], data[25], data[26], data[27], data[28], data[29],
-        data[30], data[31], data[32], data[33], data[34], data[35], data[36], data[37], data[38], data[39]);
-    applog(LOG_DEBUG, "Msg2: %x %x %x %x %x\n", data[40], data[41], data[42], data[43], data[44]);
-
-	/* Midstate after hashing first 128 bytes */
-	blk->ctx_a = S.h[0];
-	blk->ctx_b = S.h[1];
-	blk->ctx_c = S.h[2];
-	blk->ctx_d = S.h[3];
-	blk->ctx_e = S.h[4];
-	blk->ctx_f = S.h[5];
-	blk->ctx_g = S.h[6];
-	blk->ctx_h = S.h[7];
+	blake256_init(&s);
+	blake256_update(&s, data, 64 << 3, 0);	
+	blake256_update(&s, data + 16, 64 << 3, 0);
 	
-	applog(LOG_DEBUG, "Midstate produced: %x %x %x %x %x %x %x %x", S.h[0], S.h[1], S.h[2], S.h[3], S.h[4], S.h[5], S.h[6], S.h[7]);
+	blk->work->DCRPrev7 = (((uint64_t)(s.h[7])) << 32) | (uint64_t)(s.h[6]);
 	
-	/* Last 52 bytes of the message */
-	blk->cty_a = data[32];
-	blk->cty_b = data[33];
-	blk->cty_c = data[34];
-	/* blk->cty_d = data[35] = nonce */
-
-	blk->cty_e = data[36];
-	blk->cty_f = data[37];
-	blk->cty_g = data[38];
-	blk->cty_h = data[39];
-
-	blk->cty_i = data[40];
-	blk->cty_j = data[41];
-	blk->cty_k = data[42];
-	blk->cty_l = data[43];
-
-	blk->cty_m = data[44];
+	memcpy(blk->work->Midstate, s.h, 32);
+	memcpy(blk->work->Midstate + 8, BLAKE256_CONSTS, 32);
+	
+	blk->work->Midstate[12] = 0xA4093D82UL;
+	blk->work->Midstate[13] = 0x299F3470UL;
+	
+	BLAKE_SMALL_G(data[32], data[33], 0x243F6A88UL, 0x85A308D3UL, blk->work->Midstate[0], blk->work->Midstate[4], blk->work->Midstate[8], blk->work->Midstate[12]);
+	BLAKE_SMALL_HALF_G(data[34], 0x03707344U, blk->work->Midstate[1], blk->work->Midstate[5], blk->work->Midstate[9], blk->work->Midstate[13]);
+	BLAKE_SMALL_G(data[36], data[37], 0xA4093822UL, 0x299F31D0UL, blk->work->Midstate[2], blk->work->Midstate[6], blk->work->Midstate[10], blk->work->Midstate[14]);
+	BLAKE_SMALL_G(data[38], data[39], 0x082EFA98UL, 0xEC4E6C89UL, blk->work->Midstate[3], blk->work->Midstate[7], blk->work->Midstate[11], blk->work->Midstate[15]);
 }
 
 struct pc_data {

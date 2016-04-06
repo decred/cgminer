@@ -1155,6 +1155,7 @@ extern bool add_pool_details(struct pool *pool, bool live, char *url, char *user
 #define MIN_SCRYPT_INTENSITY_STR "8"
 #define MAX_SCRYPT_INTENSITY 31
 #define MAX_SCRYPT_INTENSITY_STR "31"
+/*
 #ifdef USE_SCRYPT
 #define MIN_INTENSITY (opt_scrypt ? MIN_SCRYPT_INTENSITY : MIN_SHA_INTENSITY)
 #define MIN_INTENSITY_STR (opt_scrypt ? MIN_SCRYPT_INTENSITY_STR : MIN_SHA_INTENSITY_STR)
@@ -1173,6 +1174,13 @@ extern bool add_pool_details(struct pool *pool, bool live, char *url, char *user
 #define MAX_INTENSITY_STR (opt_blake256 ? MAX_SCRYPT_INTENSITY_STR : MAX_SHA_INTENSITY_STR)
 #define MAX_GPU_INTENSITY (opt_blake256 ? MAX_SCRYPT_INTENSITY : MAX_SHA_INTENSITY)
 #endif
+*/
+
+#define MIN_INTENSITY		8
+#define MIN_INTENSITY_STR	"8"
+#define MAX_INTENSITY		31
+#define MAX_INTENSITY_STR	"31"
+#define MAX_GPU_INTENSITY	31
 
 extern bool hotplug_mode;
 extern int hotplug_time;

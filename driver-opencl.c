@@ -1096,43 +1096,23 @@ static cl_int queue_scrypt_kernel(_clState *clState, dev_blk_ctx *blk, __maybe_u
 
 static cl_int queue_blake256_kernel(_clState *clState, dev_blk_ctx *blk, __maybe_unused cl_uint threads)
 {
+	uint64_t Target = ((uint64_t *)blk->work->target)[3];
 	cl_kernel *kernel = &clState->kernel;
-	unsigned int num = 0;
+	uint32_t TmpData[13], num = 0;
 	cl_int status = 0;
-        
+	    
+    for(int i = 0; i < 13; ++i) TmpData[i] = __builtin_bswap32(((uint32_t *)blk->work->data)[i + 32]);
+    
+    status |= clEnqueueWriteBuffer(clState->commandQueue, clState->CLbuffer0, true, 0, sizeof(cl_uint) * 13, TmpData, 0, NULL, NULL);
+    status |= clEnqueueWriteBuffer(clState->commandQueue, clState->Midstate, true, 0, sizeof(cl_uint) * 16, blk->work->Midstate, 0, NULL,NULL);
+    
 	CL_SET_ARG(clState->outputBuffer);
-	/* Midstate */
-	CL_SET_BLKARG(ctx_a);
-	CL_SET_BLKARG(ctx_b);
-	CL_SET_BLKARG(ctx_c);
-	CL_SET_BLKARG(ctx_d);
-	CL_SET_BLKARG(ctx_e);
-	CL_SET_BLKARG(ctx_f);
-	CL_SET_BLKARG(ctx_g);
-	CL_SET_BLKARG(ctx_h);
+	CL_SET_ARG(clState->Midstate);
+	CL_SET_ARG(clState->CLbuffer0);
+	CL_SET_ARG(blk->work->DCRPrev7);
+	CL_SET_ARG(Target);
 	
-	/* Last 52 bytes of message */
-	CL_SET_BLKARG(cty_a);
-	CL_SET_BLKARG(cty_b);
-	CL_SET_BLKARG(cty_c);
-	/* NONCE */
-	
-	CL_SET_BLKARG(cty_e);
-	CL_SET_BLKARG(cty_f);
-	CL_SET_BLKARG(cty_g);
-	CL_SET_BLKARG(cty_h);
-
-	CL_SET_BLKARG(cty_i);
-	CL_SET_BLKARG(cty_j);
-	CL_SET_BLKARG(cty_k);
-	CL_SET_BLKARG(cty_l);
-
-	CL_SET_BLKARG(cty_m);
-    /* Padding 0 */
-    /* Padding 1 */
-    /* Padding 2 */
-	
-	return status;
+	return(status);
 }
 
 static void set_threads_hashes(unsigned int vectors,int64_t *hashes, size_t *globalThreads,

@@ -1431,6 +1431,10 @@ struct work {
 
 	dev_blk_ctx	blk;
 
+	bool MidstateValid;
+	uint32_t Midstate[16];
+	uint64_t DCRPrev7;
+
 	struct thr_info	*thr;
 	int		thr_id;
 	struct pool	*pool;

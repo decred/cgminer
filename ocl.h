@@ -21,6 +21,7 @@ typedef struct {
 	cl_mem outputBuffer;
 	cl_mem CLbuffer0;
 	cl_mem padbuffer8;
+	cl_mem Midstate;
 	size_t padbufsize;
 	void * cldata;
 	bool hasBitAlign;

@@ -59,9 +59,15 @@ cd ..
 
 echo "Getting ADL headers."
 cd ..
-cp ADL_SDK9.zip cgminer/ADL_SDK/
+ADL=ADL_SDK9.zip
+if [ ! -e $ADL ]
+then
+    echo "ADL headers not found in $PWD.  Download ADL_SDK9.zip from http://developer.amd.com/tools-and-sdks/graphics-development/display-library-adl-sdk/"
+    exit
+fi
+cp $ADL cgminer/ADL_SDK/
 cd cgminer/ADL_SDK/
-unzip -q ADL_SDK9.zip
+unzip -q $ADL.zip
 cp include/* .
 
 echo "Building cgminer."

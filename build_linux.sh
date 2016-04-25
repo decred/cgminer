@@ -67,7 +67,7 @@ then
 fi
 cp $ADL cgminer/ADL_SDK/
 cd cgminer/ADL_SDK/
-unzip -q $ADL.zip
+unzip -q $ADL
 cp include/* .
 
 echo "Building cgminer."

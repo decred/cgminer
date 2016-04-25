@@ -12,7 +12,7 @@ set -e
 
 touch build.log
 
-echo "Downloading dependancies if needed."
+echo "Downloading dependencies if needed."
 mkdir -p ../cgminer-static
 cd ../cgminer-static/
 ZLIB=zlib-1.2.8

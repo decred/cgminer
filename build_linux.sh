@@ -46,7 +46,7 @@ cd ..
 echo "Building curl."
 tar -xzf $CURL.tar.gz
 cd $CURL
-./configure --disable-rt --disable-rtsp --disable-libcurl-option --disable-ipv6 --disable-verbose --without-ca-bundle --disable-telnet --disable-tftp --disable-pop3 --disable-imap --disable-smb --disable-smtp --disable-gopher --disable-ftp --disable-file --disable-dict --disable-unix-sockets --disable-manual --disable-shared --enable-static --prefix=$PREF >> build.log 2>&1
+./configure --disable-rt --disable-rtsp --disable-libcurl-option --disable-ipv6 --disable-verbose --without-ca-bundle --disable-telnet --disable-tftp --disable-pop3 --disable-imap --disable-smb --disable-smtp --disable-gopher --disable-ftp --disable-file --disable-dict --disable-unix-sockets --disable-manual --without-libidn --without-librtmp --without-libssh2 --disable-ldap --disable-ldaps --disable-shared --enable-static --prefix=$PREF >> build.log 2>&1
 make install >> build.log 2>&1
 cd ..
 

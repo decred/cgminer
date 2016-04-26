@@ -23,6 +23,7 @@ config.log
 config.status
 config.guess
 config.sub
+build.log
 
 mingw32-config.cache
 

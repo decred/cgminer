@@ -74,3 +74,4 @@ echo "Building cgminer."
 cd ..
 PKG_CONFIG_LIBDIR=$PREF/lib/pkgconfig/ ./autogen.sh --enable-opencl >> build.log 2>&1
 make >> build.log 2>&1
+echo "Build complete."

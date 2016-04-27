@@ -42,32 +42,32 @@ set -e
 # jolan@decred.org
 
 echo "Building dependencies via mxe."
-mkdir -p ../cgminer-static
-cd ../cgminer-static
+mkdir -p ../cgminer-static/win
+cd ../cgminer-static/win
 if [ ! -e mxe ]
 then
 	git clone https://github.com/mxe/mxe.git
 fi
 cd mxe
-make MXE_TARGETS='x86_64-w64-mingw32.static' curl ncurses pthreads
+make MXE_TARGETS='x86_64-w64-mingw32.static' curl ncurses pthreads >> build.log 2>&1
 cd ..
 
 # OpenCL
 echo "Getting OpenCL headers and library."
-cd ..
+cd ../..
 OPENCL=AMD_OpenCL.zip
 if [ ! -e $OPENCL ]
 then
 	echo "OpenCL headers and library not found in $PWD.  See script comments for more information."
 	exit
 fi
-cp $OPENCL cgminer-static
-cd cgminer-static
+cp $OPENCL cgminer-static/win
+cd cgminer-static/win
 unzip -qo $OPENCL
 
 # ADL
 echo "Getting ADL headers."
-cd ..
+cd ../..
 ADL=ADL_SDK9.zip
 if [ ! -e $ADL ]
 then
@@ -81,6 +81,6 @@ cp -f include/* .
 
 echo "Building cgminer."
 cd ..
-env CFLAGS="-DCURL_STATICLIB" CPPFLAGS="-I`pwd`/../cgminer-static/include -I`pwd`/../cgminer-static/mxe/usr/x86_64-w64-mingw32.static/include" LDFLAGS="-L`pwd`/../cgminer-static/lib -L`pwd`/../cgminer-static/mxe/usr/x86_64-w64-mingw32.static/lib" sh autogen.sh --enable-opencl --host=x86_64-w64-mingw32 --build=x86_64-linux
-make V=1
+env CFLAGS="-DCURL_STATICLIB" CPPFLAGS="-I`pwd`/../cgminer-static/win/include -I`pwd`/../cgminer-static/win/mxe/usr/x86_64-w64-mingw32.static/include" LDFLAGS="-L`pwd`/../cgminer-static/win/lib -L`pwd`/../cgminer-static/win/mxe/usr/x86_64-w64-mingw32.static/lib" sh autogen.sh --enable-opencl --host=x86_64-w64-mingw32 --build=x86_64-linux >> build-win.log 2>&1
+make V=1 >> build-win.log 2>&1
 echo "Build complete."

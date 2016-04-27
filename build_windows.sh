@@ -83,3 +83,4 @@ echo "Building cgminer."
 cd ..
 env CFLAGS="-DCURL_STATICLIB" CPPFLAGS="-I`pwd`/../cgminer-static/include -I`pwd`/../cgminer-static/mxe/usr/x86_64-w64-mingw32.static/include" LDFLAGS="-L`pwd`/../cgminer-static/lib -L`pwd`/../cgminer-static/mxe/usr/x86_64-w64-mingw32.static/lib" sh autogen.sh --enable-opencl --host=x86_64-w64-mingw32 --build=x86_64-linux
 make V=1
+echo "Build complete."
